@@ -2,13 +2,24 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"github.com/golang/protobuf/proto"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+)
+
+const defaultSource = "https://github.com/v2fly/geoip/raw/release/geoip.dat"
+
+var (
+	source  = flag.String("source", defaultSource, "IP data file.")
+	country = flag.String("country", "CN", "Country.")
+	ipv4Out = flag.String("ipv4_out", "", "IPv4 address output file.")
+	ipv6Out = flag.String("ipv6_out", "", "IPv6 address output file.")
 )
 
 func loadIP(filename, country string) ([]*CIDR, error) {
@@ -60,21 +71,38 @@ func loadSite(filename, country string) ([]*Domain, error) {
 }
 
 func main() {
-	if len(os.Args) < 4 {
-		println(os.Args[0] + " source country output")
-		os.Exit(1)
+	flag.Parse()
+	if *ipv4Out == "" && *ipv6Out == "" {
+		flag.PrintDefaults()
 		return
 	}
-	ips, err := loadIP(os.Args[1], os.Args[2])
+	ips, err := loadIP(*source, *country)
 	if err != nil {
 		log.Fatal(err)
 	}
-	file, err := os.Create(os.Args[3])
-	if err != nil {
-		log.Fatal(err)
+	var ipv4File, ipv6File *os.File
+	if *ipv4Out != "" {
+		ipv4File, err = os.Create(*ipv4Out)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer ipv4File.Close()
 	}
-	defer file.Close()
+	if *ipv6Out != "" {
+		ipv6File, err = os.Create(*ipv6Out)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer ipv6File.Close()
+	}
+
 	for _, ip := range ips {
-		file.WriteString(fmt.Sprintf("%d.%d.%d.%d/%d\n", ip.Ip[0], ip.Ip[1], ip.Ip[2], ip.Ip[3], ip.Prefix))
+		addr := net.IP(ip.Ip)
+		addrString := fmt.Sprintf("%s/%d\n", addr.String(), ip.Prefix)
+		if len(ip.Ip) == 4 && ipv4File != nil {
+			ipv4File.WriteString(addrString)
+		} else if len(ip.Ip) == 16 && ipv6File != nil {
+			ipv6File.WriteString(addrString)
+		}
 	}
 }
